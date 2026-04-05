@@ -16,8 +16,9 @@ const Login = () => {
       await login('admin@madhuvan.farm', password);
     } catch (err) {
       console.error(err);
-      setError('❌ Incorrect Business Key or Connection Error.');
-      setTimeout(() => setError(''), 3000);
+      // Expose the actual Supabase error message
+      setError(`❌ ${err.message || 'Connection Error'}`);
+      setTimeout(() => setError(''), 5000);
     }
   };
 
