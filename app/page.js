@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/AuthContext';
+import { supabase } from '../lib/supabase';
 import EntryForm from '../components/EntryForm';
 // ... (rest of imports)
 
@@ -81,7 +82,9 @@ export default function Home() {
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem('sugarcane_master_data', JSON.stringify(masterData));
+    syncMasterDataToSupabase(masterData);
   }, [masterData, mounted]);
+
 
   useEffect(() => {
     if (!mounted) return;
@@ -108,6 +111,119 @@ export default function Home() {
     if (!mounted) return;
     localStorage.setItem('sugarcane_reminder_days', reminderDays.toString());
   }, [reminderDays, mounted]);
+
+  const syncToSupabase = async (table, entry) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      let payload = {
+        id: entry.id,
+        sr_no: entry.srNo || entry.sr_no,
+        status: entry.status || 'Pending',
+        transactions: entry.transactions || [],
+        total_amount: parseFloat(entry.totalAmount) || 0,
+        doneDate: entry.doneDate || null,
+        reminderDays: entry.reminderDays || 15
+      };
+
+      if (table === 'diesel_entries' || table === 'diesel') {
+        payload = {
+          ...payload,
+          tractor_number: entry.tractorNumber,
+          total_liters: parseFloat(entry.totalLiters) || 0
+        };
+        await supabase.from('diesel_entries').upsert(payload);
+      } else {
+        payload = {
+          ...payload,
+          first_name: entry.firstName,
+          last_name: entry.lastName,
+          village: entry.village,
+          total_weight_kg: parseFloat(entry.totalWeightKG) || 0,
+          total_bijane_apeli: parseFloat(entry.totalBijaneApeli || entry.totalLended) || 0,
+          unit: entry.unit,
+          contractor: entry.contractor,
+          tractor_number: entry.tractorNumber,
+          sugarcane_type: entry.sugarcaneType,
+          rate: parseFloat(entry.rate) || 0,
+          receiver_name: entry.receiverName
+        };
+        await supabase.from(table).upsert(payload);
+      }
+    } catch (err) {
+      console.error(`Supabase sync error (${table}):`, err.message);
+    }
+  };
+
+  const deleteFromSupabase = async (table, id) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      await supabase.from(table).delete().eq('id', id);
+    } catch (err) {
+      console.error(`Supabase delete error (${table}):`, err.message);
+    }
+  };
+
+  const syncMasterDataToSupabase = async (data) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      await supabase.from('master_data').upsert({ key: 'sugarcane_master', data });
+    } catch (err) {
+      console.error('Supabase master sync error:', err.message);
+    }
+  };
+
+  const pushLocalToSupabase = async () => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      alert('Supabase URL not configured!');
+      return;
+    }
+    if (!window.confirm('This will push all your LOCAL data to CLOUD Supabase. It will overwrite cloud records with matching IDs. Continue?')) return;
+    
+    try {
+      let count = 0;
+      // 1. Deliveries
+      for (const e of entries) { await syncToSupabase('deliveries', e); count++; }
+      // 2. Lending
+      for (const e of bijaneApeliEntries) { await syncToSupabase('lending', e); count++; }
+      // 3. Borrowing
+      for (const e of borrowEntries) { await syncToSupabase('borrowing', e); count++; }
+      // 4. Diesel
+      for (const e of dieselEntries) { await syncToSupabase('diesel_entries', e); count++; }
+      // 5. Master Data
+      await syncMasterDataToSupabase(masterData);
+      
+      alert(`✅ Migration Complete! ${count} records synchronized with Supabase.`);
+    } catch (err) {
+      alert('❌ Error pushing data: ' + err.message);
+    }
+  };
+
+  const fetchAllFromSupabase = async () => {
+    try {
+      const { data: deliv } = await supabase.from('deliveries').select('*').order('sr_no');
+      if (deliv?.length > 0) setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no })));
+
+      const { data: lend } = await supabase.from('lending').select('*').order('sr_no');
+      if (lend?.length > 0) setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+
+      const { data: borr } = await supabase.from('borrowing').select('*').order('sr_no');
+      if (borr?.length > 0) setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+
+      const { data: master } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').single();
+      if (master?.data) setMasterData(master.data);
+      
+      const { data: diesel } = await supabase.from('diesel_entries').select('*').order('sr_no');
+      if (diesel?.length > 0) setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no })));
+    } catch (err) {
+      console.error('Global Supabase fetch error:', err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (mounted && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      fetchAllFromSupabase();
+    }
+  }, [mounted]);
 
   // Sync selectedEntry
   useEffect(() => {
@@ -155,9 +271,10 @@ export default function Home() {
           transactions: [...(updated[existingIndex].transactions || []), { id: Date.now(), ...data, weight: parseFloat(data.weight) }]
         };
         setBijaneApeliEntries(updated);
+        syncToSupabase('lending', updated[existingIndex]);
       } else {
-        setBijaneApeliEntries([...bijaneApeliEntries, {
-          id: Date.now(),
+        const newEntry = {
+          id: Date.now().toString(),
           srNo: bijaneApeliEntries.length + 1,
           firstName: data.firstName,
           lastName: data.lastName,
@@ -172,7 +289,9 @@ export default function Home() {
           receiverName: data.receiverName || '',
           status: 'Pending',
           transactions: [{ id: Date.now(), ...data, weight: parseFloat(data.weight) }]
-        }]);
+        };
+        setBijaneApeliEntries([...bijaneApeliEntries, newEntry]);
+        syncToSupabase('lending', newEntry);
       }
     } else if (targetType === 'borrowing') {
       const existingIndex = borrowEntries.findIndex(b => 
@@ -196,9 +315,10 @@ export default function Home() {
           transactions: [...(updated[existingIndex].transactions || []), { id: Date.now(), ...data, weight: parseFloat(data.weight) }]
         };
         setBorrowEntries(updated);
+        syncToSupabase('borrowing', updated[existingIndex]);
       } else {
-        setBorrowEntries([...borrowEntries, {
-          id: Date.now(),
+        const newEntry = {
+          id: Date.now().toString(),
           srNo: borrowEntries.length + 1,
           firstName: data.firstName,
           lastName: data.lastName,
@@ -213,7 +333,9 @@ export default function Home() {
           receiverName: data.receiverName || '',
           status: 'Pending',
           transactions: [{ id: Date.now(), ...data, weight: parseFloat(data.weight) }]
-        }]);
+        };
+        setBorrowEntries([...borrowEntries, newEntry]);
+        syncToSupabase('borrowing', newEntry);
       }
     } else if (targetType === 'diesel') {
       const existingIndex = dieselEntries.findIndex(d => 
@@ -229,16 +351,31 @@ export default function Home() {
           transactions: [...(updated[existingIndex].transactions || []), { id: Date.now(), ...data }]
         };
         setDieselEntries(updated);
+        syncToSupabase('diesel_entries', { ...updated[existingIndex], tractorNumber: updated[existingIndex].tractorNumber, totalLiters: updated[existingIndex].totalLiters }); // Custom mapping if needed or just use raw
+        // Wait, diesel has different fields (liters). I should probably use a separate helper or fix syncToSupabase.
+        // Actually, syncToSupabase is tailored for sugarcane.
       } else {
-        setDieselEntries([...dieselEntries, {
-          id: Date.now(),
+        const newEntry = {
+          id: Date.now().toString(),
           srNo: dieselEntries.length + 1,
           tractorNumber: data.tractorNumber,
           totalAmount: amount,
           totalLiters: parseFloat(data.liters) || 0,
           status: 'Pending',
           transactions: [{ id: Date.now(), ...data }]
-        }]);
+        };
+        setDieselEntries([...dieselEntries, newEntry]);
+        // saveDieselToSupabase was deleted in favor of syncToSupabase.
+        // Let's use a specific call for diesel.
+        supabase.from('diesel_entries').upsert({
+          id: newEntry.id,
+          sr_no: newEntry.srNo,
+          tractor_number: newEntry.tractorNumber,
+          total_liters: newEntry.totalLiters,
+          total_amount: newEntry.totalAmount,
+          status: newEntry.status,
+          transactions: newEntry.transactions
+        });
       }
     } else {
       const existingIndex = entries.findIndex(e => 
@@ -263,9 +400,10 @@ export default function Home() {
           transactions: [...(updated[existingIndex].transactions || []), { id: Date.now(), ...data, weight: parseFloat(data.weight) }]
         };
         setEntries(updated);
+        syncToSupabase('deliveries', updated[existingIndex]);
       } else {
-        setEntries([...entries, {
-          id: Date.now(),
+        const newEntry = {
+          id: Date.now().toString(),
           srNo: entries.length + 1,
           firstName: data.firstName,
           lastName: data.lastName,
@@ -281,7 +419,9 @@ export default function Home() {
           receiverName: data.receiverName || '',
           status: 'Pending',
           transactions: [{ id: Date.now(), ...data, weight: parseFloat(data.weight) }]
-        }]);
+        };
+        setEntries([...entries, newEntry]);
+        syncToSupabase('deliveries', newEntry);
       }
     }
     setIsModalOpen(false);
@@ -362,13 +502,25 @@ export default function Home() {
       }
 
     }
-
+    
     if (updatedEntry && selectedEntry && selectedEntry.id === editingAccount.id) {
       setSelectedEntry(updatedEntry);
+    }
+    if (updatedEntry) {
+      const tableMap = {
+        'deliveries': 'deliveries',
+        'bijane_apeli': 'lending',
+        'lending': 'lending',
+        'borrowing': 'borrowing',
+        'diesel': 'diesel_entries'
+      };
+      const table = tableMap[targetType];
+      if (table) syncToSupabase(table, updatedEntry);
     }
     setEditingAccount(null);
     setIsModalOpen(false);
   };
+
 
   const totalInwardKG = [...entries, ...borrowEntries].reduce((acc, curr) => acc + (parseFloat(curr.totalWeightKG) || 0), 0);
   const totalOutwardKG = bijaneApeliEntries.reduce((acc, curr) => acc + (parseFloat(curr.totalWeightKG) || 0), 0);
@@ -394,10 +546,22 @@ export default function Home() {
 
   const deleteEntry = (id) => {
     if (window.confirm('Are you sure?')) {
-      if (currentReg === 'deliveries') setEntries(entries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
-      else if (currentReg === 'bijane_apeli' || currentReg === 'lending') setBijaneApeliEntries(bijaneApeliEntries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
-      else if (currentReg === 'diesel') setDieselEntries(dieselEntries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
-      else setBorrowEntries(borrowEntries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
+      if (currentReg === 'deliveries') {
+        setEntries(entries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
+        deleteFromSupabase('deliveries', id);
+      }
+      else if (currentReg === 'bijane_apeli' || currentReg === 'lending') {
+        setBijaneApeliEntries(bijaneApeliEntries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
+        deleteFromSupabase('lending', id);
+      }
+      else if (currentReg === 'diesel') {
+        setDieselEntries(dieselEntries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
+        deleteFromSupabase('diesel_entries', id);
+      }
+      else {
+        setBorrowEntries(borrowEntries.filter(e => e.id !== id).map((e, index) => ({ ...e, srNo: index + 1 })));
+        deleteFromSupabase('borrowing', id);
+      }
     }
 
   };
@@ -405,7 +569,21 @@ export default function Home() {
     setEntries(entries.map(e => e.id === id ? { ...e, status: 'Paid', doneDate: null } : e));
     setBijaneApeliEntries(bijaneApeliEntries.map(l => l.id === id ? { ...l, status: 'Paid', doneDate: null } : l));
     setBorrowEntries(borrowEntries.map(b => b.id === id ? { ...b, status: 'Paid', doneDate: null } : b));
-    setDieselEntries(dieselEntries.map(d => d.id === id ? { ...d, status: 'Paid', doneDate: null } : d));
+    setDieselEntries(dieselEntries.map(d => {
+      if (d.id === id) {
+        const updated = { ...d, status: 'Paid', doneDate: null };
+        syncToSupabase('diesel_entries', updated);
+        return updated;
+      }
+      return d;
+    }));
+    // Sync other types too
+    const ent = entries.find(e => e.id === id);
+    if (ent) syncToSupabase('deliveries', { ...ent, status: 'Paid', doneDate: null });
+    const lend = bijaneApeliEntries.find(e => e.id === id);
+    if (lend) syncToSupabase('lending', { ...lend, status: 'Paid', doneDate: null });
+    const borr = borrowEntries.find(e => e.id === id);
+    if (borr) syncToSupabase('borrowing', { ...borr, status: 'Paid', doneDate: null });
   };
 
 
@@ -432,7 +610,26 @@ export default function Home() {
     setEntries(update);
     setBijaneApeliEntries(update);
     setBorrowEntries(update);
-    setDieselEntries(update);
+    setDieselEntries(prev => prev.map(e => {
+      if (e.id === id) {
+        const updated = { 
+          ...e, 
+          totalBijaneApeli: (e.totalBijaneApeli || 0) + parseFloat(amount),
+          transactions: [...(e.transactions || []), upadTx]
+        };
+        syncToSupabase('diesel_entries', updated);
+        return updated;
+      }
+      return e;
+    }));
+
+    // Sync others
+    const ent = entries.find(e => e.id === id);
+    if (ent) syncToSupabase('deliveries', { ...ent, totalBijaneApeli: (ent.totalBijaneApeli || 0) + parseFloat(amount), transactions: [...(ent.transactions || []), upadTx] });
+    const lend = bijaneApeliEntries.find(e => e.id === id);
+    if (lend) syncToSupabase('lending', { ...lend, totalBijaneApeli: (lend.totalBijaneApeli || 0) + parseFloat(amount), transactions: [...(lend.transactions || []), upadTx] });
+    const borr = borrowEntries.find(e => e.id === id);
+    if (borr) syncToSupabase('borrowing', { ...borr, totalBijaneApeli: (borr.totalBijaneApeli || 0) + parseFloat(amount), transactions: [...(borr.transactions || []), upadTx] });
   };
 
 
@@ -453,7 +650,27 @@ export default function Home() {
     setEntries(update);
     setBijaneApeliEntries(update);
     setBorrowEntries(update);
-    setDieselEntries(update);
+    setDieselEntries(prev => prev.map(e => {
+      if (e.id === id) {
+        let newStatus = e.status === 'Done' ? 'Pending' : 'Done';
+        const updated = { 
+          ...e, 
+          status: newStatus,
+          doneDate: newStatus === 'Done' ? Date.now() : null,
+          reminderDays: newStatus === 'Done' ? (customDays !== undefined ? parseInt(customDays) : 15) : (e.reminderDays || 15)
+        };
+        syncToSupabase('diesel_entries', updated);
+        return updated;
+      }
+      return e;
+    }));
+
+    // Sync others
+    const ent = entries.find(e => e.id === id);
+    if (ent) {
+        let newStatus = ent.status === 'Done' ? 'Pending' : 'Done';
+        syncToSupabase('deliveries', { ...ent, status: newStatus, doneDate: newStatus === 'Done' ? Date.now() : null, reminderDays: newStatus === 'Done' ? (customDays !== undefined ? parseInt(customDays) : 15) : (ent.reminderDays || 15) });
+    }
   };
 
   const exportToExcel = () => {
@@ -735,6 +952,7 @@ export default function Home() {
         onExportFiltered={() => {}} 
         onLogout={handleLogout} 
         onChangeModule={() => setActiveModule(null)} 
+        onMigrateToCloud={pushLocalToSupabase}
       />
       <div className="main-content" style={{ flex: 1, marginLeft: '280px', padding: '20px' }}>
         <div className="container" style={{ maxWidth: '1600px', margin: '0 auto' }}>

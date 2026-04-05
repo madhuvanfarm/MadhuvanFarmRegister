@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 const AttendanceModule = ({ onBack }) => {
   const [mounted, setMounted] = useState(false);
@@ -22,16 +23,111 @@ const AttendanceModule = ({ onBack }) => {
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
   const [bulkAttendance, setBulkAttendance] = useState({});
 
+  // Multiplier mapping
+  const multipliers = { 'Full': 1.0, 'Half': 0.5, 'One and Half': 1.5, 'Two': 2.0, 'Absent': 0 };
+
+  const fetchContractors = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('attendance_contractors')
+        .select(`
+          *,
+          staff: attendance_staff(*),
+          records: attendance_records(*)
+        `)
+        .order('name', { ascending: true });
+      
+      if (error) throw error;
+      if (data) setContractors(data);
+    } catch (err) {
+      console.error('Supabase fetch contractors error:', err.message);
+    }
+  };
+
   useEffect(() => {
     setMounted(true);
-    const saved = localStorage.getItem('madhuvan_attendance_v2');
-    if (saved) {
-      setContractors(JSON.parse(saved));
+    if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      fetchContractors();
+    } else {
+      const saved = localStorage.getItem('madhuvan_attendance_v2');
+      if (saved) setContractors(JSON.parse(saved));
     }
   }, []);
 
+  const syncContractorToSupabase = async (contractor) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      // For now, we keep the legacy upsert for the contractor name
+      await supabase.from('attendance_contractors').upsert({
+        id: contractor.id,
+        name: contractor.name
+      });
+    } catch (err) {
+      console.error('Supabase sync contractor error:', err.message);
+    }
+  };
+
+  const syncStaffToSupabase = async (staffMember, contractorId) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      await supabase.from('attendance_staff').upsert({
+        id: staffMember.id,
+        contractor_id: contractorId,
+        name: staffMember.name
+      });
+    } catch (err) {
+      console.error('Supabase sync staff error:', err.message);
+    }
+  };
+
+  const syncRecordsToSupabase = async (records, contractorId) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      const formattedRecords = records.map(r => ({
+        id: String(r.id),
+        staff_id: r.staffId,
+        contractor_id: contractorId,
+        date: r.date,
+        status: r.value,
+        units: multipliers[r.value] || 0,
+        upad: parseFloat(r.upad) || 0,
+        remarks: r.remarks || ''
+      }));
+      await supabase.from('attendance_records').upsert(formattedRecords);
+    } catch (err) {
+      console.error('Supabase sync records error:', err.message);
+    }
+  };
+
+  const deleteContractorFromSupabase = async (id) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      await supabase.from('attendance_contractors').delete().eq('id', id);
+    } catch (err) {
+      console.error('Supabase delete contractor error:', err.message);
+    }
+  };
+
+  const deleteStaffFromSupabase = async (id) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      await supabase.from('attendance_staff').delete().eq('id', id);
+    } catch (err) {
+      console.error('Supabase delete staff error:', err.message);
+    }
+  };
+
+  const deleteRecordFromSupabase = async (id) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    try {
+      await supabase.from('attendance_records').delete().eq('id', String(id));
+    } catch (err) {
+      console.error('Supabase delete record error:', err.message);
+    }
+  };
+
   useEffect(() => {
-    if (mounted) {
+    if (mounted && !process.env.NEXT_PUBLIC_SUPABASE_URL) {
       localStorage.setItem('madhuvan_attendance_v2', JSON.stringify(contractors));
     }
   }, [contractors, mounted]);
@@ -61,6 +157,7 @@ const AttendanceModule = ({ onBack }) => {
       records: []
     };
     setContractors([...contractors, newC]);
+    syncContractorToSupabase(newC);
     setNewContractorName('');
     setIsContractorModalOpen(false);
     setSelectedContractorId(newC.id);
@@ -69,6 +166,7 @@ const AttendanceModule = ({ onBack }) => {
   const deleteContractor = (id) => {
     if (window.confirm('Delete this contractor and all their records?')) {
       setContractors(contractors.filter(c => c.id !== id));
+      deleteContractorFromSupabase(id);
       if (selectedContractorId === id) setSelectedContractorId(null);
     }
   };
@@ -77,7 +175,7 @@ const AttendanceModule = ({ onBack }) => {
   const addStaff = (e) => {
     e.preventDefault();
     if (!newStaffName.trim() || !selectedContractorId) return;
-    setContractors(contractors.map(c => {
+    const updated = contractors.map(c => {
       if (c.id === selectedContractorId) {
         return {
           ...c,
@@ -85,13 +183,19 @@ const AttendanceModule = ({ onBack }) => {
         };
       }
       return c;
-    }));
+    });
+    setContractors(updated);
+    const updatedContractor = updated.find(c => c.id === selectedContractorId);
+    if (updatedContractor) {
+      const newStaffMember = updatedContractor.staff[updatedContractor.staff.length - 1];
+      syncStaffToSupabase(newStaffMember, selectedContractorId);
+    }
     setNewStaffName('');
   };
 
   const deleteStaff = (staffId) => {
     if (window.confirm('Remove this staff member?')) {
-      setContractors(contractors.map(c => {
+      const updated = contractors.map(c => {
         if (c.id === selectedContractorId) {
           return {
             ...c,
@@ -100,7 +204,9 @@ const AttendanceModule = ({ onBack }) => {
           };
         }
         return c;
-      }));
+      });
+      setContractors(updated);
+      deleteStaffFromSupabase(staffId);
     }
   };
 
@@ -123,26 +229,32 @@ const AttendanceModule = ({ onBack }) => {
       return;
     }
 
-    setContractors(contractors.map(c => {
+    const updated = contractors.map(c => {
       if (c.id === selectedContractorId) {
         return { ...c, records: [...newRecords, ...c.records] };
       }
       return c;
-    }));
+    });
+    setContractors(updated);
+    syncRecordsToSupabase(newRecords, selectedContractorId);
     
     setIsAttendanceModalOpen(false);
   };
 
+
   const deleteRecord = (recordId) => {
     if (window.confirm('Delete this record?')) {
-      setContractors(contractors.map(c => {
+      const updated = contractors.map(c => {
         if (c.id === selectedContractorId) {
           return { ...c, records: c.records.filter(r => r.id !== recordId) };
         }
         return c;
-      }));
+      });
+      setContractors(updated);
+      deleteRecordFromSupabase(recordId);
     }
   };
+
 
   const updateBulkRow = (staffId, field, val) => {
     setBulkAttendance(prev => ({
@@ -152,9 +264,6 @@ const AttendanceModule = ({ onBack }) => {
   };
 
   if (!mounted) return null;
-
-  // Multiplier mapping
-  const multipliers = { 'Full': 1.0, 'Half': 0.5, 'One and Half': 1.5, 'Two': 2.0, 'Absent': 0 };
 
   // Calculate staff summary
   const getStaffSummary = () => {
@@ -224,8 +333,27 @@ const AttendanceModule = ({ onBack }) => {
                     value={staffSearchTerm}
                     onChange={(e) => setStaffSearchTerm(e.target.value)}
                   />
-                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.4 }}>🔍</span>
+                <button onClick={() => setStaffSearchTerm(e.target.value)} className="btn-icon" style={{ opacity: 0.4 }}>🔍</button>
                 </div>
+                <button 
+                  onClick={async () => {
+                    const saved = localStorage.getItem('madhuvan_attendance_v2');
+                    if (!saved) return alert('No local data found!');
+                    if (!window.confirm('Migrate ALL local attendance to Cloud?')) return;
+                    const data = JSON.parse(saved);
+                    for (const c of data) {
+                      await syncContractorToSupabase(c);
+                      for (const s of c.staff) await syncStaffToSupabase(s, c.id);
+                      await syncRecordsToSupabase(c.records, c.id);
+                    }
+                    alert('Attendance Migration Complete!');
+                    fetchContractors();
+                  }}
+                  className="btn" 
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--secondary)', fontSize: '0.8rem' }}
+                >
+                  ☁️ Sync Local to Cloud
+                </button>
                 <button onClick={() => setIsStaffModalOpen(true)} className="btn" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>👥 Manage Staff</button>
                 <button onClick={() => setIsAttendanceModalOpen(true)} className="btn btn-primary" style={{ height: '48px', padding: '0 24px' }}>📝 Record Daily Sheet</button>
               </div>
