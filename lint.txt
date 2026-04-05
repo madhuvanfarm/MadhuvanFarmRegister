@@ -1,0 +1,71 @@
+﻿
+> madhuvan-farm@1.0.0 lint
+> next lint
+
+node.exe : 
+At C:\Program Files\nodejs\npm.ps1:29 
+char:3
++   & $NODE_EXE $NPM_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecif 
+   ied: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCom 
+   mandError
+ 
+./app/page.js
+239:6  Warning: React Hook useEffect 
+has a missing dependency: 
+'selectedEntry'. Either include it or 
+remove the dependency array.  
+react-hooks/exhaustive-deps
+921:13  Error: 'Login' is not defined.  
+react/jsx-no-undef
+925:13  Error: 'ModuleSelection' is not 
+defined.  react/jsx-no-undef
+935:13  Error: 'AttendanceModule' is 
+not defined.  react/jsx-no-undef
+947:8  Error: 'Sidebar' is not defined. 
+ react/jsx-no-undef
+1014:14  Error: 'EntryList' is not 
+defined.  react/jsx-no-undef
+1029:12  Error: 'EntryDetailModal' is 
+not defined.  react/jsx-no-undef
+1032:12  Error: 'BillModal' is not 
+defined.  react/jsx-no-undef
+1034:12  Error: 'NotificationCenter' is 
+not defined.  react/jsx-no-undef
+1036:12  Error: 'SummaryModal' is not 
+defined.  react/jsx-no-undef
+
+./components/BillModal.jsx
+179:22  Error: `"` can be escaped with 
+`&quot;`, `&ldquo;`, `&#34;`, 
+`&rdquo;`.  react/no-unescaped-entities
+179:34  Error: `'` can be escaped with 
+`&apos;`, `&lsquo;`, `&#39;`, 
+`&rsquo;`.  react/no-unescaped-entities
+179:40  Error: `'` can be escaped with 
+`&apos;`, `&lsquo;`, `&#39;`, 
+`&rsquo;`.  react/no-unescaped-entities
+179:68  Error: `"` can be escaped with 
+`&quot;`, `&ldquo;`, `&#34;`, 
+`&rdquo;`.  react/no-unescaped-entities
+
+./components/EntryDetailModal.jsx
+93:127  Error: `"` can be escaped with 
+`&quot;`, `&ldquo;`, `&#34;`, 
+`&rdquo;`.  react/no-unescaped-entities
+93:142  Error: `"` can be escaped with 
+`&quot;`, `&ldquo;`, `&#34;`, 
+`&rdquo;`.  react/no-unescaped-entities
+192:126  Error: `"` can be escaped with 
+`&quot;`, `&ldquo;`, `&#34;`, 
+`&rdquo;`.  react/no-unescaped-entities
+192:137  Error: `"` can be escaped with 
+`&quot;`, `&ldquo;`, `&#34;`, 
+`&rdquo;`.  react/no-unescaped-entities
+
+info  - Need to disable some ESLint 
+rules? Learn more here: https://nextjs.o
+rg/docs/app/api-reference/config/eslint#
+disabling-rules

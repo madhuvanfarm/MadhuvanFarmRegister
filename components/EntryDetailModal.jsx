@@ -90,7 +90,7 @@ const EntryDetailModal = ({ isOpen, onClose, entry, onDelete, onEdit, onToggleSt
               {entry.remark && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
                   <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Note:</span>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: '500', fontSize: '0.85rem', fontStyle: 'italic' }}>"{entry.remark}"</span>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: '500', fontSize: '0.85rem', fontStyle: 'italic' }}>&quot;{entry.remark}&quot;</span>
                 </div>
               )}
             </div>
@@ -189,7 +189,7 @@ const EntryDetailModal = ({ isOpen, onClose, entry, onDelete, onEdit, onToggleSt
                       <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>{new Date(t.deliveryDate).toLocaleDateString()}</td>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{t.entryType === 'diesel' ? '⛽ Fueling' : '💸 Advance (Upad)'}</div>
-                        {t.remark && <div style={{ fontSize: '0.8rem', color: 'var(--primary-light)', fontStyle: 'italic' }}>"{t.remark}"</div>}
+                        {t.remark && <div style={{ fontSize: '0.8rem', color: 'var(--primary-light)', fontStyle: 'italic' }}>&quot;{t.remark}&quot;</div>}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right', color: t.entryType === 'diesel' ? '#ff453a' : 'var(--secondary)', fontWeight: '600' }}>
                         ₹ {parseFloat(t.amount || 0).toLocaleString()}

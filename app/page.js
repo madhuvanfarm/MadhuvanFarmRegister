@@ -4,8 +4,15 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 import EntryForm from '../components/EntryForm';
-// ... (rest of imports)
-
+import Login from '../components/Login';
+import ModuleSelection from '../components/ModuleSelection';
+import AttendanceModule from '../components/AttendanceModule';
+import Sidebar from '../components/Sidebar';
+import EntryList from '../components/EntryList';
+import EntryDetailModal from '../components/EntryDetailModal';
+import BillModal from '../components/BillModal';
+import NotificationCenter from '../components/NotificationCenter';
+import SummaryModal from '../components/SummaryModal';
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const { user, logout } = useAuth();

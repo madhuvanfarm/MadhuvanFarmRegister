@@ -176,7 +176,7 @@ const BillModal = ({ isOpen, onClose, entry }) => {
               <div style={{ flex: 1, paddingLeft: '10px' }}>
                 <div style={{ fontWeight: '700', fontSize: '12px', borderBottom: '1px solid #000', width: 'fit-content', marginBottom: '5px' }}>Terms & Condition :</div>
                 <div style={{ fontSize: '11px', fontStyle: 'italic' }}>
-                  1. "Subject to 'SURAT' Jurisdiction only. E.&.O.E"
+                  1. &quot;Subject to &apos;SURAT&apos; Jurisdiction only. E.&amp;.O.E&quot;
                 </div>
               </div>
               <div style={{ flex: 1, textAlign: 'right', paddingRight: '10px' }}>
