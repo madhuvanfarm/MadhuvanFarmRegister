@@ -2,11 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthContext';
 
 const AttendanceModule = ({ onBack }) => {
-  const [mounted, setMounted] = useState(false);
-  const [contractors, setContractors] = useState([]);
-  const [selectedContractorId, setSelectedContractorId] = useState(null);
+  const { user } = useAuth();
   
   // Modals
   const [isContractorModalOpen, setIsContractorModalOpen] = useState(false);
@@ -27,6 +26,7 @@ const AttendanceModule = ({ onBack }) => {
   const multipliers = { 'Full': 1.0, 'Half': 0.5, 'One and Half': 1.5, 'Two': 2.0, 'Absent': 0 };
 
   const fetchContractors = async () => {
+    if (!user) return;
     try {
       const { data, error } = await supabase
         .from('attendance_contractors')
@@ -35,31 +35,59 @@ const AttendanceModule = ({ onBack }) => {
           staff: attendance_staff(*),
           records: attendance_records(*)
         `)
+        .eq('user_id', user.id)
         .order('name', { ascending: true });
       
       if (error) throw error;
-      if (data) setContractors(data);
+      if (data?.length > 0) {
+        setContractors(data);
+        return data.length;
+      }
+      return 0;
     } catch (err) {
       console.error('Supabase fetch contractors error:', err.message);
+      return 0;
     }
   };
 
   useEffect(() => {
     setMounted(true);
-    if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      fetchContractors();
-    } else {
-      const saved = localStorage.getItem('madhuvan_attendance_v2');
-      if (saved) setContractors(JSON.parse(saved));
-    }
   }, []);
 
+  useEffect(() => {
+    const handleInitialSync = async () => {
+      if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        const cloudCount = await fetchContractors();
+        
+        // Auto-migrate if Cloud is empty but local has data
+        if (cloudCount === 0) {
+          const saved = localStorage.getItem('madhuvan_attendance_v2');
+          if (saved && JSON.parse(saved).length > 0) {
+            console.log('Automating initial attendance cloud migration...');
+            const localData = JSON.parse(saved);
+            for (const c of localData) {
+              await syncContractorToSupabase(c);
+              for (const s of c.staff) await syncStaffToSupabase(s, c.id);
+              await syncRecordsToSupabase(c.records, c.id);
+            }
+            fetchContractors(); // Refresh state from cloud
+          }
+        }
+      } else if (mounted && !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        const saved = localStorage.getItem('madhuvan_attendance_v2');
+        if (saved) setContractors(JSON.parse(saved));
+      }
+    };
+    handleInitialSync();
+  }, [mounted, user]);
+
   const syncContractorToSupabase = async (contractor) => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     try {
       // For now, we keep the legacy upsert for the contractor name
       await supabase.from('attendance_contractors').upsert({
         id: contractor.id,
+        user_id: user.id,
         name: contractor.name
       });
     } catch (err) {
@@ -68,10 +96,11 @@ const AttendanceModule = ({ onBack }) => {
   };
 
   const syncStaffToSupabase = async (staffMember, contractorId) => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     try {
       await supabase.from('attendance_staff').upsert({
         id: staffMember.id,
+        user_id: user.id,
         contractor_id: contractorId,
         name: staffMember.name
       });
@@ -81,10 +110,11 @@ const AttendanceModule = ({ onBack }) => {
   };
 
   const syncRecordsToSupabase = async (records, contractorId) => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     try {
       const formattedRecords = records.map(r => ({
         id: String(r.id),
+        user_id: user.id,
         staff_id: r.staffId,
         contractor_id: contractorId,
         date: r.date,
@@ -335,25 +365,6 @@ const AttendanceModule = ({ onBack }) => {
                   />
                 <button onClick={() => setStaffSearchTerm(e.target.value)} className="btn-icon" style={{ opacity: 0.4 }}>🔍</button>
                 </div>
-                <button 
-                  onClick={async () => {
-                    const saved = localStorage.getItem('madhuvan_attendance_v2');
-                    if (!saved) return alert('No local data found!');
-                    if (!window.confirm('Migrate ALL local attendance to Cloud?')) return;
-                    const data = JSON.parse(saved);
-                    for (const c of data) {
-                      await syncContractorToSupabase(c);
-                      for (const s of c.staff) await syncStaffToSupabase(s, c.id);
-                      await syncRecordsToSupabase(c.records, c.id);
-                    }
-                    alert('Attendance Migration Complete!');
-                    fetchContractors();
-                  }}
-                  className="btn" 
-                  style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--secondary)', fontSize: '0.8rem' }}
-                >
-                  ☁️ Sync Local to Cloud
-                </button>
                 <button onClick={() => setIsStaffModalOpen(true)} className="btn" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>👥 Manage Staff</button>
                 <button onClick={() => setIsAttendanceModalOpen(true)} className="btn btn-primary" style={{ height: '48px', padding: '0 24px' }}>📝 Record Daily Sheet</button>
               </div>

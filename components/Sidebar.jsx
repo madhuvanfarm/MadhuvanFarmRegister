@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const Sidebar = ({ currentReg, onRegChange, masterData, onUpdateMasterData, onExportFiltered, onLogout, onChangeModule }) => {
+const Sidebar = ({ currentReg, onRegChange, masterData, onUpdateMasterData, onExportFiltered, onLogout, onChangeModule, onMigrateToCloud }) => {
   const [openSections, setOpenSections] = useState({
     contractors: true,
     rates: false,

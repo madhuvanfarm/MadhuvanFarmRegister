@@ -42,7 +42,7 @@ export default function Home() {
   const [showBillModal, setShowBillModal] = useState(false);
   const [billTarget, setBillTarget] = useState(null);
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount (as fallback/initial state)
   useEffect(() => {
     setMounted(true);
     
@@ -52,36 +52,14 @@ export default function Home() {
     const savedMaster = localStorage.getItem('sugarcane_master_data');
     if (savedMaster) setMasterData(JSON.parse(savedMaster));
     
-    const savedEntries = localStorage.getItem('sugarcane_entries');
-    if (savedEntries) {
-      const parsed = JSON.parse(savedEntries);
-      setEntries(parsed.map(e => {
-        let migrated = { ...e };
-        if (migrated.seller && !migrated.firstName) {
-          const parts = migrated.seller.split(' ');
-          migrated.firstName = parts[0] || '';
-          migrated.lastName = parts.slice(1).join(' ') || '';
-        }
-        migrated.totalWeightKG = parseFloat(migrated.totalWeightKG) || 0;
-        migrated.totalAmount = parseFloat(migrated.totalAmount) || 0;
-        migrated.totalBijaneApeli = parseFloat(migrated.totalBijaneApeli || migrated.totalLended) || 0;
-        if (migrated.contractor === undefined) migrated.contractor = '';
-        if (migrated.tractorNumber === undefined) migrated.tractorNumber = '';
-        if (migrated.sugarcaneType === undefined) migrated.sugarcaneType = '';
-        if (migrated.rate === undefined) migrated.rate = '';
-        if (!migrated.deliveryDate) migrated.deliveryDate = new Date().toISOString().split('T')[0];
-        return migrated;
-      }));
+    // Only load from localStorage if we don't have a plan to fetch from Supabase immediately
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      const savedEntries = localStorage.getItem('sugarcane_entries');
+      if (savedEntries) {
+        const parsed = JSON.parse(savedEntries);
+        setEntries(parsed.map(e => ({ ...e, totalWeightKG: parseFloat(e.totalWeightKG) || 0, totalAmount: parseFloat(e.totalAmount) || 0 })));
+      }
     }
-    
-    const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries') || localStorage.getItem('sugarcane_lender_entries');
-    if (savedBijane) setBijaneApeliEntries(JSON.parse(savedBijane).map(e => ({ ...e, entryType: 'bijane_apeli', receiverName: e.receiverName || e.giverName || e.lenderName || '' })));
-    
-    const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
-    if (savedBorrow) setBorrowEntries(JSON.parse(savedBorrow));
-
-    const savedDiesel = localStorage.getItem('sugarcane_diesel_entries');
-    if (savedDiesel) setDieselEntries(JSON.parse(savedDiesel));
   }, []);
 
 
@@ -120,10 +98,11 @@ export default function Home() {
   }, [reminderDays, mounted]);
 
   const syncToSupabase = async (table, entry) => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     try {
       let payload = {
         id: entry.id,
+        user_id: user.id,
         sr_no: entry.srNo || entry.sr_no,
         status: entry.status || 'Pending',
         transactions: entry.transactions || [],
@@ -171,66 +150,123 @@ export default function Home() {
   };
 
   const syncMasterDataToSupabase = async (data) => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     try {
-      await supabase.from('master_data').upsert({ key: 'sugarcane_master', data });
+      await supabase.from('master_data').upsert({ key: 'sugarcane_master', user_id: user.id, data });
     } catch (err) {
       console.error('Supabase master sync error:', err.message);
     }
   };
 
-  const pushLocalToSupabase = async () => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      alert('Supabase URL not configured!');
-      return;
-    }
-    if (!window.confirm('This will push all your LOCAL data to CLOUD Supabase. It will overwrite cloud records with matching IDs. Continue?')) return;
+  const pushLocalToSupabase = async (isSilent = false, overrideData = null) => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!isSilent && !window.confirm('This will push all your LOCAL data to CLOUD Supabase. It will overwrite cloud records with matching IDs. Continue?')) return;
     
     try {
+      const dataToPush = overrideData || {
+        entries,
+        bijane: bijaneApeliEntries,
+        borrow: borrowEntries,
+        diesel: dieselEntries,
+        master: masterData
+      };
+
       let count = 0;
       // 1. Deliveries
-      for (const e of entries) { await syncToSupabase('deliveries', e); count++; }
+      for (const e of dataToPush.entries) { await syncToSupabase('deliveries', e); count++; }
       // 2. Lending
-      for (const e of bijaneApeliEntries) { await syncToSupabase('lending', e); count++; }
+      for (const e of dataToPush.bijane) { await syncToSupabase('lending', e); count++; }
       // 3. Borrowing
-      for (const e of borrowEntries) { await syncToSupabase('borrowing', e); count++; }
+      for (const e of dataToPush.borrow) { await syncToSupabase('borrowing', e); count++; }
       // 4. Diesel
-      for (const e of dieselEntries) { await syncToSupabase('diesel_entries', e); count++; }
+      for (const e of dataToPush.diesel) { await syncToSupabase('diesel_entries', e); count++; }
       // 5. Master Data
-      await syncMasterDataToSupabase(masterData);
+      if (dataToPush.master) await syncMasterDataToSupabase(dataToPush.master);
       
-      alert(`✅ Migration Complete! ${count} records synchronized with Supabase.`);
+      if (!isSilent) alert(`✅ Migration Complete! ${count} records synchronized with Supabase.`);
+      
+      // Refresh local state once pushed
+      if (isSilent) fetchAllFromSupabase();
     } catch (err) {
-      alert('❌ Error pushing data: ' + err.message);
+      if (!isSilent) alert('❌ Error pushing data: ' + err.message);
     }
   };
 
   const fetchAllFromSupabase = async () => {
+    if (!user) return false;
     try {
-      const { data: deliv } = await supabase.from('deliveries').select('*').order('sr_no');
-      if (deliv?.length > 0) setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no })));
+      let hasData = false;
+      const { data: deliv } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
+      if (deliv?.length > 0) {
+        setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no })));
+        hasData = true;
+      }
 
-      const { data: lend } = await supabase.from('lending').select('*').order('sr_no');
-      if (lend?.length > 0) setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+      const { data: lend } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
+      if (lend?.length > 0) {
+        setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+        hasData = true;
+      }
 
-      const { data: borr } = await supabase.from('borrowing').select('*').order('sr_no');
-      if (borr?.length > 0) setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+      const { data: borr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
+      if (borr?.length > 0) {
+        setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+        hasData = true;
+      }
 
-      const { data: master } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').single();
-      if (master?.data) setMasterData(master.data);
+      const { data: master } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').eq('user_id', user.id).single();
+      if (master?.data) {
+        setMasterData(master.data);
+        hasData = true;
+      }
       
-      const { data: diesel } = await supabase.from('diesel_entries').select('*').order('sr_no');
-      if (diesel?.length > 0) setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no })));
+      const { data: diesel } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
+      if (diesel?.length > 0) {
+        setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no })));
+        hasData = true;
+      }
+      return hasData;
     } catch (err) {
       console.error('Global Supabase fetch error:', err.message);
+      return false;
     }
   };
 
   useEffect(() => {
-    if (mounted && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      fetchAllFromSupabase();
-    }
-  }, [mounted]);
+    const performInitialFetch = async () => {
+      if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        const foundData = await fetchAllFromSupabase();
+        
+        // If Cloud is empty and we have local data, do an auto-migration once
+        if (!foundData) {
+          const savedEntries = localStorage.getItem('sugarcane_entries');
+          if (savedEntries && JSON.parse(savedEntries).length > 0) {
+            console.log('Automating initial cloud migration...');
+            
+            // We need to pass the data explicitly or load it into state before pushing
+            const localEntries = JSON.parse(savedEntries);
+            const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries') || localStorage.getItem('sugarcane_lender_entries');
+            const localBijane = savedBijane ? JSON.parse(savedBijane) : [];
+            const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
+            const localBorrow = savedBorrow ? JSON.parse(savedBorrow) : [];
+            const savedDiesel = localStorage.getItem('sugarcane_diesel_entries');
+            const localDiesel = savedDiesel ? JSON.parse(savedDiesel) : [];
+            const savedMaster = localStorage.getItem('sugarcane_master_data');
+            const localMaster = savedMaster ? JSON.parse(savedMaster) : null;
+            
+            await pushLocalToSupabase(true, {
+              entries: localEntries,
+              bijane: localBijane,
+              borrow: localBorrow,
+              diesel: localDiesel,
+              master: localMaster
+            });
+          }
+        }
+      }
+    };
+    performInitialFetch();
+  }, [mounted, user]);
 
   // Sync selectedEntry
   useEffect(() => {
@@ -959,7 +995,6 @@ export default function Home() {
         onExportFiltered={() => {}} 
         onLogout={handleLogout} 
         onChangeModule={() => setActiveModule(null)} 
-        onMigrateToCloud={pushLocalToSupabase}
       />
       <div className="main-content" style={{ flex: 1, marginLeft: '280px', padding: '20px' }}>
         <div className="container" style={{ maxWidth: '1600px', margin: '0 auto' }}>
