@@ -13,6 +13,7 @@ const AttendanceModule = ({ onBack }) => {
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
   const [viewingStaffId, setViewingStaffId] = useState(null);
   const [staffSearchTerm, setStaffSearchTerm] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Forms
   const [newContractorName, setNewContractorName] = useState('');
@@ -27,6 +28,7 @@ const AttendanceModule = ({ onBack }) => {
 
   const fetchContractors = async () => {
     if (!user) return;
+    setIsSyncing(true);
     try {
       const { data, error } = await supabase
         .from('attendance_contractors')
@@ -41,12 +43,15 @@ const AttendanceModule = ({ onBack }) => {
       if (error) throw error;
       if (data?.length > 0) {
         setContractors(data);
+        console.log(`✅ Loaded ${data.length} contractors from cloud.`);
         return data.length;
       }
       return 0;
     } catch (err) {
-      console.error('Supabase fetch contractors error:', err.message);
+      console.error('❌ Supabase fetch contractors error:', err.message);
       return 0;
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -83,15 +88,20 @@ const AttendanceModule = ({ onBack }) => {
 
   const syncContractorToSupabase = async (contractor) => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
+    setIsSyncing(true);
     try {
       // For now, we keep the legacy upsert for the contractor name
-      await supabase.from('attendance_contractors').upsert({
+      const { error } = await supabase.from('attendance_contractors').upsert({
         id: contractor.id,
         user_id: user.id,
         name: contractor.name
       });
+      if (error) throw error;
+      console.log(`✅ Synced contractor ${contractor.name}`);
     } catch (err) {
-      console.error('Supabase sync contractor error:', err.message);
+      console.error('❌ Supabase sync contractor error:', err.message);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -349,9 +359,16 @@ const AttendanceModule = ({ onBack }) => {
         {selectedContractor ? (
           <div className="animate-fade-in" key={selectedContractorId} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '40px' }}>
-              <div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <h1 style={{ fontSize: '2.4rem', fontWeight: '800' }}>{selectedContractor.name}</h1>
-                <p style={{ opacity: 0.6 }}>Staff Summary & Payroll Dashboard</p>
+                <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                  <p style={{ opacity: 0.6 }}>Staff Summary & Payroll Dashboard</p>
+                  {isSyncing && (
+                    <div style={{ color: '#FFD700', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className="sync-spinner">🔄</span> Syncing...
+                    </div>
+                  )}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                 <div style={{ position: 'relative' }}>

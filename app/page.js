@@ -46,6 +46,7 @@ export default function Home() {
   const [currentReg, setCurrentReg] = useState('deliveries');
   const [showBillModal, setShowBillModal] = useState(false);
   const [billTarget, setBillTarget] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Load from localStorage on mount (as fallback/initial state)
   useEffect(() => {
@@ -110,6 +111,7 @@ export default function Home() {
 
   const syncToSupabase = async (table, entry) => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
+    setIsSyncing(true);
     try {
       let payload = {
         id: entry.id,
@@ -128,7 +130,8 @@ export default function Home() {
           tractor_number: entry.tractorNumber,
           total_liters: parseFloat(entry.totalLiters) || 0
         };
-        await supabase.from('diesel_entries').upsert(payload);
+        const { error } = await supabase.from('diesel_entries').upsert(payload);
+        if (error) throw error;
       } else {
         payload = {
           ...payload,
@@ -144,10 +147,14 @@ export default function Home() {
           rate: parseFloat(entry.rate) || 0,
           receiver_name: entry.receiverName
         };
-        await supabase.from(table).upsert(payload);
+        const { error } = await supabase.from(table).upsert(payload);
+        if (error) throw error;
       }
+      console.log(`✅ Synced to ${table} successfully`);
     } catch (err) {
-      console.error(`Supabase sync error (${table}):`, err.message);
+      console.error(`❌ Supabase sync error (${table}):`, err.message);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -205,41 +212,51 @@ export default function Home() {
 
   const fetchAllFromSupabase = async () => {
     if (!user) return false;
+    setIsSyncing(true);
+    console.log(`🔄 Fetching data for user: ${user.email} (${user.id})`);
     try {
       let hasData = false;
-      const { data: deliv } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
+      const { data: deliv, error: drr } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
+      if (drr) throw drr;
       if (deliv?.length > 0) {
         setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no })));
         hasData = true;
       }
 
-      const { data: lend } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
+      const { data: lend, error: lrr } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
+      if (lrr) throw lrr;
       if (lend?.length > 0) {
         setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
         hasData = true;
       }
 
-      const { data: borr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
+      const { data: borr, error: brr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
+      if (brr) throw brr;
       if (borr?.length > 0) {
         setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
         hasData = true;
       }
 
-      const { data: master } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').eq('user_id', user.id).single();
+      const { data: master, error: mrr } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').eq('user_id', user.id).single();
+      if (mrr && mrr.code !== 'PGRST116') throw mrr;
       if (master?.data) {
         setMasterData(master.data);
         hasData = true;
       }
       
-      const { data: diesel } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
+      const { data: diesel, error: dsrr } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
+      if (dsrr) throw dsrr;
       if (diesel?.length > 0) {
         setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no })));
         hasData = true;
       }
+      console.log('✅ All data fetched from cloud.');
       return hasData;
     } catch (err) {
-      console.error('Global Supabase fetch error:', err.message);
+      console.error('❌ Global Supabase fetch error:', err.message);
       return false;
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -1017,7 +1034,16 @@ export default function Home() {
                 {currentReg === 'bijane_apeli' || currentReg === 'lending' ? 'Seller Management' : currentReg === 'borrowing' ? 'Bijethi Lidhel Source Management' : currentReg === 'master_data' ? 'Consolidated Farmer/Seller Records' : 'MADHUVAN FARM | Sugarcane Entry Register'}
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '30px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+              {isSyncing && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#FFD700', fontSize: '0.8rem', opacity: 0.8 }}>
+                  <span className="sync-spinner" style={{ 
+                    display: 'inline-block', 
+                    animation: 'spin 1.5s linear infinite'
+                  }}>🔄</span>
+                  Syncing...
+                </div>
+              )}
               <button className="btn export-btn" onClick={() => setShowSummary(true)} style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', height: '50px' }}>📊 Dashboard Summary</button>
               <div 
                 onClick={() => setShowNotifications(true)} 
