@@ -26,6 +26,11 @@ export default function Home() {
     sugarcaneTypes: [],
     tractorNumbers: []
   });
+
+  const updateMasterData = (newData) => {
+    setMasterData(newData);
+    syncMasterDataToSupabase(newData);
+  };
   const [entries, setEntries] = useState([]);
   const [bijaneApeliEntries, setBijaneApeliEntries] = useState([]);
   const [borrowEntries, setBorrowEntries] = useState([]);
@@ -52,14 +57,21 @@ export default function Home() {
     const savedMaster = localStorage.getItem('sugarcane_master_data');
     if (savedMaster) setMasterData(JSON.parse(savedMaster));
     
-    // Only load from localStorage if we don't have a plan to fetch from Supabase immediately
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      const savedEntries = localStorage.getItem('sugarcane_entries');
-      if (savedEntries) {
-        const parsed = JSON.parse(savedEntries);
-        setEntries(parsed.map(e => ({ ...e, totalWeightKG: parseFloat(e.totalWeightKG) || 0, totalAmount: parseFloat(e.totalAmount) || 0 })));
-      }
+    // Load initial state from localStorage (Immediate UI)
+    const savedEntries = localStorage.getItem('sugarcane_entries');
+    if (savedEntries) {
+      const parsed = JSON.parse(savedEntries);
+      setEntries(parsed.map(e => ({ ...e, totalWeightKG: parseFloat(e.totalWeightKG) || 0, totalAmount: parseFloat(e.totalAmount) || 0 })));
     }
+    
+    const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries') || localStorage.getItem('sugarcane_lender_entries');
+    if (savedBijane) setBijaneApeliEntries(JSON.parse(savedBijane).map(e => ({ ...e, entryType: 'bijane_apeli', receiverName: e.receiverName || e.giverName || e.lenderName || '' })));
+    
+    const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
+    if (savedBorrow) setBorrowEntries(JSON.parse(savedBorrow));
+
+    const savedDiesel = localStorage.getItem('sugarcane_diesel_entries');
+    if (savedDiesel) setDieselEntries(JSON.parse(savedDiesel));
   }, []);
 
 
@@ -67,7 +79,6 @@ export default function Home() {
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem('sugarcane_master_data', JSON.stringify(masterData));
-    syncMasterDataToSupabase(masterData);
   }, [masterData, mounted]);
 
 
@@ -240,11 +251,10 @@ export default function Home() {
         // If Cloud is empty and we have local data, do an auto-migration once
         if (!foundData) {
           const savedEntries = localStorage.getItem('sugarcane_entries');
-          if (savedEntries && JSON.parse(savedEntries).length > 0) {
+          const localEntries = savedEntries ? JSON.parse(savedEntries) : [];
+          if (localEntries.length > 0) {
             console.log('Automating initial cloud migration...');
             
-            // We need to pass the data explicitly or load it into state before pushing
-            const localEntries = JSON.parse(savedEntries);
             const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries') || localStorage.getItem('sugarcane_lender_entries');
             const localBijane = savedBijane ? JSON.parse(savedBijane) : [];
             const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
@@ -991,7 +1001,7 @@ export default function Home() {
         currentReg={currentReg} 
         onRegChange={setCurrentReg} 
         masterData={masterData} 
-        onUpdateMasterData={setMasterData} 
+        onUpdateMasterData={updateMasterData} 
         onExportFiltered={() => {}} 
         onLogout={handleLogout} 
         onChangeModule={() => setActiveModule(null)} 

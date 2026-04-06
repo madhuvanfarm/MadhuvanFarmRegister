@@ -52,6 +52,9 @@ const AttendanceModule = ({ onBack }) => {
 
   useEffect(() => {
     setMounted(true);
+    // Load initial state from localStorage (Immediate UI)
+    const saved = localStorage.getItem('madhuvan_attendance_v2');
+    if (saved) setContractors(JSON.parse(saved));
   }, []);
 
   useEffect(() => {
@@ -73,9 +76,6 @@ const AttendanceModule = ({ onBack }) => {
             fetchContractors(); // Refresh state from cloud
           }
         }
-      } else if (mounted && !process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const saved = localStorage.getItem('madhuvan_attendance_v2');
-        if (saved) setContractors(JSON.parse(saved));
       }
     };
     handleInitialSync();
