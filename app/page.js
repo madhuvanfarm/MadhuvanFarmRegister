@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/AuthContext';
+import CloudDiagnostics from '../components/CloudDiagnostics';
 import { supabase } from '../lib/supabase';
 import EntryForm from '../components/EntryForm';
 import Login from '../components/Login';
@@ -57,12 +58,27 @@ export default function Home() {
   const [editingAccount, setEditingAccount] = useState(null);
   const [activeTab, setActiveTab] = useState('Active'); 
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [syncLogs, setSyncLogs] = useState([]);
+  const addSyncLog = (msg, type = 'info') => {
+    const time = new Date().toLocaleTimeString();
+    setSyncLogs(prev => [{ time, msg, type }, ...prev].slice(0, 20)); // Keep last 20
+  };
+
+  const [cloudCounts, setCloudCounts] = useState({
+    deliveries: 0,
+    lending: 0,
+    borrowing: 0,
+    diesel: 0,
+    master: 0
+  });
   const [showSummary, setShowSummary] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [currentReg, setCurrentReg] = useState('deliveries');
   const [showBillModal, setShowBillModal] = useState(false);
   const [billTarget, setBillTarget] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState('Checking...');
   useEffect(() => {
     setMounted(true);
     const savedReminder = localStorage.getItem('sugarcane_reminder_days');
@@ -114,7 +130,12 @@ export default function Home() {
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem('sugarcane_master_data', JSON.stringify(masterData));
-  }, [masterData, mounted]);
+    
+    // Automate sync for dropdown lists (Master Data)
+    if (user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      syncMasterDataToSupabase(masterData);
+    }
+  }, [masterData, mounted, user]);
 
   const syncToSupabase = async (table, entry) => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
@@ -146,21 +167,32 @@ export default function Home() {
           last_name: entry.lastName,
           village: entry.village,
           total_weight_kg: parseFloat(entry.totalWeightKG) || 0,
-          total_bijane_apeli: parseFloat(entry.totalBijaneApeli || entry.totalLended) || 0,
           unit: entry.unit,
           contractor: entry.contractor,
           tractor_number: entry.tractorNumber,
           sugarcane_type: entry.sugarcaneType,
-          rate: parseFloat(entry.rate) || 0,
-          receiver_name: entry.receiverName
+          rate: parseFloat(entry.rate) || 0
         };
+
+        // Only deliveries table has the total_bijane_apeli (Advance) column
+        if (table === 'deliveries') {
+          payload.total_bijane_apeli = parseFloat(entry.totalBijaneApeli || entry.totalLended) || 0;
+        }
+
+        if (table !== 'deliveries') {
+          payload.receiver_name = entry.receiverName;
+        }
+
         const { error } = await supabase.from(table).upsert(payload);
         if (error) throw error;
+        addSyncLog(`Synced record to ${table}`);
       }
       console.log(`✅ Synced to ${table} successfully`);
     } catch (err) {
       console.error(`❌ Supabase sync error (${table}):`, err.message);
-      // Optional: alert('Sync Failed: ' + err.message); 
+      addSyncLog(`Sync ERROR (${table}): ${err.message}`, 'error');
+      setCloudStatus('Error');
+      alert(`Sync Failed for ${table}: ` + err.message);
     } finally {
       setIsSyncing(false);
     }
@@ -179,8 +211,10 @@ export default function Home() {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     try {
       await supabase.from('master_data').upsert({ key: 'sugarcane_master', user_id: user.id, data });
+      addSyncLog('Synced Master Data to cloud');
     } catch (err) {
       console.error('Supabase master sync error:', err.message);
+      addSyncLog(`Master Sync ERROR: ${err.message}`, 'error');
     }
   };
 
@@ -198,6 +232,7 @@ export default function Home() {
       };
 
       let count = 0;
+      addSyncLog(`Starting background push of local data...`);
       // 1. Deliveries
       for (const e of dataToPush.entries) { await syncToSupabase('deliveries', e); count++; }
       // 2. Lending
@@ -211,8 +246,9 @@ export default function Home() {
       
       if (!isSilent) alert(`✅ Migration Complete! ${count} records synchronized with Supabase.`);
       
-      // Refresh local state once pushed
-      if (isSilent) fetchAllFromSupabase();
+      // Always refresh local state once pushed
+      fetchAllFromSupabase();
+      localStorage.setItem('sugarcane_last_full_sync', Date.now().toString());
     } catch (err) {
       if (!isSilent) alert('❌ Error pushing data: ' + err.message);
     }
@@ -228,9 +264,12 @@ export default function Home() {
       try {
         const { data: deliv, error: drr } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
         if (drr) throw drr;
-        if (deliv) {
+        if (deliv && deliv.length > 0) {
           setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalAmount: d.total_amount, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-          if (deliv.length > 0) hasData = true;
+          hasData = true;
+          setCloudCounts(prev => ({ ...prev, deliveries: deliv.length }));
+        } else {
+          setCloudCounts(prev => ({ ...prev, deliveries: 0 }));
         }
       } catch (err) { console.error('❌ Supabase fetch deliveries error:', err.message); }
 
@@ -238,9 +277,12 @@ export default function Home() {
       try {
         const { data: lend, error: lrr } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
         if (lrr) throw lrr;
-        if (lend) {
+        if (lend && lend.length > 0) {
           setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalAmount: d.total_amount, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-          if (lend.length > 0) hasData = true;
+          hasData = true;
+          setCloudCounts(prev => ({ ...prev, lending: lend.length }));
+        } else {
+          setCloudCounts(prev => ({ ...prev, lending: 0 }));
         }
       } catch (err) { console.error('❌ Supabase fetch lending error:', err.message); }
 
@@ -248,9 +290,12 @@ export default function Home() {
       try {
         const { data: borr, error: brr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
         if (brr) throw brr;
-        if (borr) {
+        if (borr && borr.length > 0) {
           setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalAmount: d.total_amount, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-          if (borr.length > 0) hasData = true;
+          hasData = true;
+          setCloudCounts(prev => ({ ...prev, borrowing: borr.length }));
+        } else {
+          setCloudCounts(prev => ({ ...prev, borrowing: 0 }));
         }
       } catch (err) { console.error('❌ Supabase fetch borrowing error:', err.message); }
 
@@ -261,6 +306,9 @@ export default function Home() {
         if (master?.data) {
           setMasterData(master.data);
           hasData = true;
+          setCloudCounts(prev => ({ ...prev, master: 1 }));
+        } else {
+          setCloudCounts(prev => ({ ...prev, master: 0 }));
         }
       } catch (err) { console.error('❌ Supabase fetch master error:', err.message); }
       
@@ -268,16 +316,21 @@ export default function Home() {
       try {
         const { data: diesel, error: dsrr } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
         if (dsrr) throw dsrr;
-        if (diesel) {
+        if (diesel && diesel.length > 0) {
           setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, totalAmount: d.total_amount, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-          if (diesel.length > 0) hasData = true;
+          hasData = true;
+          setCloudCounts(prev => ({ ...prev, diesel: diesel.length }));
+        } else {
+          setCloudCounts(prev => ({ ...prev, diesel: 0 }));
         }
       } catch (err) { console.error('❌ Supabase fetch diesel error:', err.message); }
 
       console.log('✅ Background cloud sync complete.');
+      setCloudStatus('Connected');
       return hasData;
     } catch (err) {
       console.error('❌ Critical Supabase fetch error:', err.message);
+      setCloudStatus('Error');
       return false;
     } finally {
       setIsSyncing(false);
@@ -285,8 +338,22 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      fetchAllFromSupabase();
+    if (mounted && user) {
+      if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        setCloudStatus('Connecting...');
+        fetchAllFromSupabase().then(hasCloudData => {
+          // If the cloud is empty OR it's been more than 1 hour, perform an auto-push
+          const lastSync = localStorage.getItem('sugarcane_last_full_sync');
+          const shouldAutoPush = !hasCloudData || !lastSync || (Date.now() - parseInt(lastSync) > 3600000);
+          
+          if (shouldAutoPush) {
+            console.log('🚀 Automatic background sync (local -> cloud) triggered.');
+            pushLocalToSupabase(true);
+          }
+        });
+      } else {
+        setCloudStatus('Local Only');
+      }
     }
   }, [mounted, user]);
 
@@ -339,7 +406,7 @@ export default function Home() {
         syncToSupabase('lending', updated[existingIndex]);
       } else {
         const newEntry = {
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           srNo: bijaneApeliEntries.length + 1,
           firstName: data.firstName,
           lastName: data.lastName,
@@ -383,7 +450,7 @@ export default function Home() {
         syncToSupabase('borrowing', updated[existingIndex]);
       } else {
         const newEntry = {
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           srNo: borrowEntries.length + 1,
           firstName: data.firstName,
           lastName: data.lastName,
@@ -421,7 +488,7 @@ export default function Home() {
         // Actually, syncToSupabase is tailored for sugarcane.
       } else {
         const newEntry = {
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           srNo: dieselEntries.length + 1,
           tractorNumber: data.tractorNumber,
           totalAmount: amount,
@@ -460,7 +527,7 @@ export default function Home() {
         syncToSupabase('deliveries', updated[existingIndex]);
       } else {
         const newEntry = {
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           srNo: entries.length + 1,
           firstName: data.firstName,
           lastName: data.lastName,
@@ -508,7 +575,7 @@ export default function Home() {
       else if (originalType === 'bijane_apeli') setBijaneApeliEntries(bijaneApeliEntries.filter(e => e.id !== editingAccount.id));
       else setBorrowEntries(borrowEntries.filter(e => e.id !== editingAccount.id));
 
-      const baseInfo = { ...editingAccount, ...data, totalWeightKG: kgWeight, totalAmount: amount, id: Date.now(), status: editingAccount.status || 'Pending' };
+      const baseInfo = { ...editingAccount, ...data, totalWeightKG: kgWeight, totalAmount: amount, id: crypto.randomUUID(), status: editingAccount.status || 'Pending' };
 
       if (targetType === 'deliveries') {
         updatedEntry = { ...baseInfo, srNo: entries.length + 1 };
@@ -1009,6 +1076,7 @@ export default function Home() {
         onExportFiltered={() => {}} 
         onLogout={handleLogout} 
         onChangeModule={() => setActiveModule(null)} 
+        onMigrateToCloud={() => {}} // Disabled as it is now automated
       />
       <div className="main-content" style={{ flex: 1, marginLeft: '280px', padding: '20px' }}>
         <div className="container" style={{ maxWidth: '1600px', margin: '0 auto' }}>
@@ -1022,6 +1090,14 @@ export default function Home() {
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+              <div 
+                onClick={() => setIsDiagnosticsOpen(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', color: cloudStatus === 'Connected' ? '#4CAF50' : cloudStatus === 'Error' ? '#ff453a' : '#FFD700', fontSize: '0.8rem', opacity: 0.8, cursor: 'help' }} 
+                title={cloudStatus === 'Local Only' ? 'Credentials missing in .env.local - Working in LOCAL mode.' : `Sync Health: ${cloudStatus} (Click for Diagnostics)`}
+              >
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: cloudStatus === 'Connected' ? '#4CAF50' : cloudStatus === 'Error' ? '#ff453a' : '#FFD700' }}></span>
+                {cloudStatus}
+              </div>
               {isSyncing && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#FFD700', fontSize: '0.8rem', opacity: 0.8 }}>
                   <span className="sync-spinner" style={{ 
@@ -1031,6 +1107,10 @@ export default function Home() {
                   Syncing...
                 </div>
               )}
+              <CloudStatusIndicator 
+                status={cloudStatus} 
+                onClick={() => setIsDiagnosticsOpen(true)} 
+              />
               <button className="btn export-btn" onClick={() => setShowSummary(true)} style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', height: '50px' }}>📊 Dashboard Summary</button>
               <div 
                 onClick={() => setShowNotifications(true)} 
@@ -1120,11 +1200,54 @@ export default function Home() {
               ),
               bijaneApeliRegisterAmount: bijaneApeliEntries.filter(e => e.status !== 'Paid').reduce((acc, curr) => acc + (parseFloat(curr.totalAmount) || 0), 0),
               deliveryAdvance: entries.reduce((acc, curr) => acc + (parseFloat(curr.totalBijaneApeli || curr.totalLended) || 0), 0),
-              totalDieselExpense: dieselEntries.reduce((acc, curr) => acc + (parseFloat(curr.totalAmount) || 0), 0)
+              totalDieselExpense: dieselEntries.reduce((acc, curr) => acc + (parseFloat(curr.totalAmount) || 0) || 0, 0)
             }} 
+          />
+
+          <CloudDiagnostics 
+            isOpen={isDiagnosticsOpen}
+            onClose={() => setIsDiagnosticsOpen(false)}
+            user={user}
+            cloudStatus={cloudStatus}
+            counts={cloudCounts}
+            logs={syncLogs}
           />
         </div>
       </div>
     </div>
   );
 }
+
+const CloudStatusIndicator = ({ status, onClick }) => {
+  const color = status === 'Connected' ? '#34c759' : status === 'Error' ? '#ff453a' : '#ff9500';
+  return (
+    <div 
+      onClick={onClick} 
+      style={{ 
+        cursor: 'pointer', 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: '8px', 
+        padding: '10px 15px', 
+        background: 'rgba(255,255,255,0.05)', 
+        borderRadius: '10px', 
+        border: '1px solid var(--glass-border)',
+        transition: 'all 0.2s ease'
+      }}
+      onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+      onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+    >
+      <div style={{ 
+        width: '8px', 
+        height: '8px', 
+        borderRadius: '50%', 
+        background: color, 
+        boxShadow: `0 0 10px ${color}`,
+        animation: status === 'Syncing' ? 'pulse 1.5s infinite' : 'none'
+      }}></div>
+      <span style={{ fontSize: '0.8rem', fontWeight: '800', color: 'white', letterSpacing: '0.5px' }}>
+        {status === 'Connected' ? 'CONNECTED' : (status === 'Error' || status === 'Sync Error') ? 'SYNC ERROR' : 'SYNCING...'}
+      </span>
+    </div>
+  );
+};

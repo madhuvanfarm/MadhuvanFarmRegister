@@ -252,9 +252,8 @@ const EntryList = ({ entries, activeTab, onTabChange, onDelete, onEdit, onToggle
                     {mode === 'diesel' ? account.tractorNumber : `${account.firstName} ${account.lastName}`}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--primary-light)' }}>
-                    {mode === 'diesel' ? (account.transactions?.[account.transactions.length - 1]?.remark ? `📝 ${account.transactions[account.transactions.length - 1].remark}` : `🚜 Tractor Expense Log`) : `📍 ${account.village || 'N/A'}`}
+                    📍 {account.village || 'N/A'}
                   </div>
-
                 </td>
 
                 {mode === 'master_data' ? (

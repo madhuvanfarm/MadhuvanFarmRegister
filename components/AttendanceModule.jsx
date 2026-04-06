@@ -29,6 +29,45 @@ const AttendanceModule = ({ onBack }) => {
   // Multiplier mapping
   const multipliers = { 'Full': 1.0, 'Half': 0.5, 'One and Half': 1.5, 'Two': 2.0, 'Absent': 0 };
 
+  // Utility to migrate legacy timestamp IDs to UUIDs (for Supabase compatibility)
+  const migrateAttendanceToUUIDs = (data) => {
+    let hasChanged = false;
+    const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+    const migrated = (data || []).map(c => {
+      const oldCId = c.id;
+      const newCId = isUUID(oldCId) ? oldCId : crypto.randomUUID();
+      if (newCId !== oldCId) hasChanged = true;
+
+      // Migrate staff
+      const staffMap = {};
+      const migratedStaff = (c.staff || []).map(s => {
+        const oldSId = s.id;
+        const newSId = isUUID(oldSId) ? oldSId : crypto.randomUUID();
+        staffMap[oldSId] = newSId;
+        if (newSId !== oldSId) hasChanged = true;
+        return { ...s, id: newSId };
+      });
+
+      // Migrate records (re-link to new staff IDs)
+      const migratedRecords = (c.records || []).map(r => {
+        const oldRecordId = r.id;
+        const newRecordId = isUUID(oldRecordId) ? oldRecordId : crypto.randomUUID();
+        if (newRecordId !== oldRecordId) hasChanged = true;
+        
+        return {
+          ...r,
+          id: newRecordId,
+          staffId: staffMap[r.staffId] || r.staffId
+        };
+      });
+
+      return { ...c, id: newCId, staff: migratedStaff, records: migratedRecords };
+    });
+
+    return { migrated, hasChanged };
+  };
+
   const fetchContractors = async () => {
     if (!user) return;
     setIsSyncing(true);
@@ -44,7 +83,7 @@ const AttendanceModule = ({ onBack }) => {
         .order('name', { ascending: true });
       
       if (error) throw error;
-      if (data) {
+      if (data && data.length > 0) {
         setContractors(data.map(c => ({
           ...c,
           staff: c.staff || [],
@@ -71,12 +110,28 @@ const AttendanceModule = ({ onBack }) => {
   useEffect(() => {
     setMounted(true);
     const saved = localStorage.getItem('madhuvan_attendance_v2');
-    if (saved) setContractors(JSON.parse(saved));
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const { migrated, hasChanged } = migrateAttendanceToUUIDs(parsed);
+      setContractors(migrated);
+      if (hasChanged) {
+        console.log('✅ Migrated Attendance IDs to UUID format.');
+        localStorage.setItem('madhuvan_attendance_v2', JSON.stringify(migrated));
+      }
+    }
   }, []);
 
   useEffect(() => {
     if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      fetchContractors();
+      fetchContractors().then(hasData => {
+        const lastSync = localStorage.getItem('attendance_last_full_sync');
+        const shouldAutoPush = !hasData || !lastSync || (Date.now() - parseInt(lastSync) > 3600000);
+        
+        if (shouldAutoPush) {
+          console.log('🚀 Automatic background sync (Attendance) triggered.');
+          pushAttendanceToSupabase(true);
+        }
+      });
     }
   }, [mounted, user]);
 
@@ -93,7 +148,32 @@ const AttendanceModule = ({ onBack }) => {
       if (error) throw error;
       console.log(`✅ Synced contractor ${contractor.name}`);
     } catch (err) {
+      alert('Sync Error (Contractor): ' + err.message);
       console.error('❌ Supabase sync contractor error:', err.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const pushAttendanceToSupabase = async (isSilent = false) => {
+    if (!user || !process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+    if (!isSilent && !window.confirm('This will push all your current Attendance contractors and staff to the cloud. Continue?')) return;
+    
+    setIsSyncing(true);
+    try {
+      let count = 0;
+      for (const contractor of contractors) {
+        await syncContractorToSupabase(contractor);
+        for (const staffMember of (contractor.staff || [])) {
+          await syncStaffToSupabase(staffMember, contractor.id);
+        }
+        await syncRecordsToSupabase(contractor.records || [], contractor.id);
+        count++;
+      }
+      if (!isSilent) alert(`✅ Attendance Sync Complete! ${count} contractors migrated.`);
+      localStorage.setItem('attendance_last_full_sync', Date.now().toString());
+    } catch (err) {
+      if (!isSilent) alert('❌ Sync Error: ' + err.message);
     } finally {
       setIsSyncing(false);
     }
@@ -129,6 +209,7 @@ const AttendanceModule = ({ onBack }) => {
       }));
       await supabase.from('attendance_records').upsert(formattedRecords);
     } catch (err) {
+      alert('Sync Error (Records): ' + err.message);
       console.error('Supabase sync records error:', err.message);
     }
   };
@@ -185,7 +266,7 @@ const AttendanceModule = ({ onBack }) => {
     e.preventDefault();
     if (!newContractorName.trim()) return;
     const newC = {
-      id: Date.now(),
+      id: crypto.randomUUID(),
       name: newContractorName.trim(),
       staff: [],
       records: []
@@ -213,7 +294,7 @@ const AttendanceModule = ({ onBack }) => {
       if (c.id === selectedContractorId) {
         return {
           ...c,
-          staff: [...c.staff, { id: Date.now(), name: newStaffName.trim() }]
+          staff: [...c.staff, { id: crypto.randomUUID(), name: newStaffName.trim() }]
         };
       }
       return c;
@@ -252,7 +333,7 @@ const AttendanceModule = ({ onBack }) => {
     const newRecords = Object.entries(bulkAttendance)
       .filter(([_, data]) => data.value !== 'Absent' || data.upad !== '')
       .map(([staffId, data]) => ({
-        id: Date.now() + Math.random(),
+        id: crypto.randomUUID(),
         staffId,
         date: attendanceDate,
         ...data
