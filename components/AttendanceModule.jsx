@@ -41,8 +41,18 @@ const AttendanceModule = ({ onBack }) => {
         .order('name', { ascending: true });
       
       if (error) throw error;
-      if (data?.length > 0) {
-        setContractors(data);
+      if (data) {
+        setContractors(data.map(c => ({
+          ...c,
+          staff: c.staff || [],
+          records: (c.records || []).map(r => ({
+            ...r,
+            staffId: r.staff_id,
+            value: r.status,
+            upad: r.upad,
+            remarks: r.remarks
+          }))
+        })));
         console.log(`✅ Loaded ${data.length} contractors from cloud.`);
         return data.length;
       }
@@ -57,6 +67,8 @@ const AttendanceModule = ({ onBack }) => {
 
   useEffect(() => {
     setMounted(true);
+    const saved = localStorage.getItem('madhuvan_attendance_v2');
+    if (saved) setContractors(JSON.parse(saved));
   }, []);
 
   useEffect(() => {
@@ -146,7 +158,9 @@ const AttendanceModule = ({ onBack }) => {
   };
 
   useEffect(() => {
-    // We no longer persist to localStorage in Cloud-Only mode
+    if (mounted) {
+      localStorage.setItem('madhuvan_attendance_v2', JSON.stringify(contractors));
+    }
   }, [contractors, mounted]);
 
   const selectedContractor = contractors.find(c => c.id === selectedContractorId);

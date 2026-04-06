@@ -67,6 +67,22 @@ export default function Home() {
     setMounted(true);
     const savedReminder = localStorage.getItem('sugarcane_reminder_days');
     if (savedReminder) setReminderDays(parseInt(savedReminder));
+    
+    // Immediate UI from localStorage
+    const savedEntries = localStorage.getItem('sugarcane_entries');
+    if (savedEntries) setEntries(JSON.parse(savedEntries));
+    
+    const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries');
+    if (savedBijane) setBijaneApeliEntries(JSON.parse(savedBijane));
+    
+    const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
+    if (savedBorrow) setBorrowEntries(JSON.parse(savedBorrow));
+
+    const savedDiesel = localStorage.getItem('sugarcane_diesel_entries');
+    if (savedDiesel) setDieselEntries(JSON.parse(savedDiesel));
+
+    const savedMaster = localStorage.getItem('sugarcane_master_data');
+    if (savedMaster) setMasterData(JSON.parse(savedMaster));
   }, []);
 
 
@@ -74,6 +90,31 @@ export default function Home() {
     if (!mounted) return;
     localStorage.setItem('sugarcane_reminder_days', reminderDays.toString());
   }, [reminderDays, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('sugarcane_entries', JSON.stringify(entries));
+  }, [entries, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('sugarcane_bijane_apeli_entries', JSON.stringify(bijaneApeliEntries));
+  }, [bijaneApeliEntries, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('sugarcane_borrow_entries', JSON.stringify(borrowEntries));
+  }, [borrowEntries, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('sugarcane_diesel_entries', JSON.stringify(dieselEntries));
+  }, [dieselEntries, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('sugarcane_master_data', JSON.stringify(masterData));
+  }, [masterData, mounted]);
 
   const syncToSupabase = async (table, entry) => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
@@ -177,49 +218,65 @@ export default function Home() {
   };
 
   const fetchAllFromSupabase = async () => {
-    if (!user) return false;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !user) return;
     setIsSyncing(true);
-    console.log(`🔄 Fetching data for user: ${user.email} (${user.id})`);
+    let hasData = false;
+    
     try {
-      let hasData = false;
-      const { data: deliv, error: drr } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
-      if (drr) throw drr;
-      if (deliv?.length > 0) {
-        setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-        hasData = true;
-      }
+      // 1. Deliveries
+      try {
+        const { data: deliv, error: drr } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
+        if (drr) throw drr;
+        if (deliv) {
+          setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          if (deliv.length > 0) hasData = true;
+        }
+      } catch (err) { console.error('❌ Supabase fetch deliveries error:', err.message); }
 
-      const { data: lend, error: lrr } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
-      if (lrr) throw lrr;
-      if (lend?.length > 0) {
-        setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-        hasData = true;
-      }
+      // 2. Lending
+      try {
+        const { data: lend, error: lrr } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
+        if (lrr) throw lrr;
+        if (lend) {
+          setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          if (lend.length > 0) hasData = true;
+        }
+      } catch (err) { console.error('❌ Supabase fetch lending error:', err.message); }
 
-      const { data: borr, error: brr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
-      if (brr) throw brr;
-      if (borr?.length > 0) {
-        setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-        hasData = true;
-      }
+      // 3. Borrowing
+      try {
+        const { data: borr, error: brr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
+        if (brr) throw brr;
+        if (borr) {
+          setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          if (borr.length > 0) hasData = true;
+        }
+      } catch (err) { console.error('❌ Supabase fetch borrowing error:', err.message); }
 
-      const { data: master, error: mrr } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').eq('user_id', user.id).single();
-      if (mrr && mrr.code !== 'PGRST116') throw mrr;
-      if (master?.data) {
-        setMasterData(master.data);
-        hasData = true;
-      }
+      // 4. Master Data
+      try {
+        const { data: master, error: mrr } = await supabase.from('master_data').select('*').eq('key', 'sugarcane_master').eq('user_id', user.id).single();
+        if (mrr && mrr.code !== 'PGRST116') throw mrr;
+        if (master?.data) {
+          setMasterData(master.data);
+          hasData = true;
+        }
+      } catch (err) { console.error('❌ Supabase fetch master error:', err.message); }
       
-      const { data: diesel, error: dsrr } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
-      if (dsrr) throw dsrr;
-      if (diesel?.length > 0) {
-        setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
-        hasData = true;
-      }
-      console.log('✅ All data fetched from cloud.');
+      // 5. Diesel Entries
+      try {
+        const { data: diesel, error: dsrr } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
+        if (dsrr) throw dsrr;
+        if (diesel) {
+          setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          if (diesel.length > 0) hasData = true;
+        }
+      } catch (err) { console.error('❌ Supabase fetch diesel error:', err.message); }
+
+      console.log('✅ Background cloud sync complete.');
       return hasData;
     } catch (err) {
-      console.error('❌ Global Supabase fetch error:', err.message);
+      console.error('❌ Critical Supabase fetch error:', err.message);
       return false;
     } finally {
       setIsSyncing(false);
