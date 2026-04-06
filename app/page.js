@@ -160,6 +160,7 @@ export default function Home() {
       console.log(`✅ Synced to ${table} successfully`);
     } catch (err) {
       console.error(`❌ Supabase sync error (${table}):`, err.message);
+      // Optional: alert('Sync Failed: ' + err.message); 
     } finally {
       setIsSyncing(false);
     }
@@ -228,7 +229,7 @@ export default function Home() {
         const { data: deliv, error: drr } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
         if (drr) throw drr;
         if (deliv) {
-          setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalAmount: d.total_amount, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
           if (deliv.length > 0) hasData = true;
         }
       } catch (err) { console.error('❌ Supabase fetch deliveries error:', err.message); }
@@ -238,7 +239,7 @@ export default function Home() {
         const { data: lend, error: lrr } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
         if (lrr) throw lrr;
         if (lend) {
-          setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalAmount: d.total_amount, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
           if (lend.length > 0) hasData = true;
         }
       } catch (err) { console.error('❌ Supabase fetch lending error:', err.message); }
@@ -248,7 +249,7 @@ export default function Home() {
         const { data: borr, error: brr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
         if (brr) throw brr;
         if (borr) {
-          setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalAmount: d.total_amount, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
           if (borr.length > 0) hasData = true;
         }
       } catch (err) { console.error('❌ Supabase fetch borrowing error:', err.message); }
@@ -268,7 +269,7 @@ export default function Home() {
         const { data: diesel, error: dsrr } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
         if (dsrr) throw dsrr;
         if (diesel) {
-          setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
+          setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, totalAmount: d.total_amount, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
           if (diesel.length > 0) hasData = true;
         }
       } catch (err) { console.error('❌ Supabase fetch diesel error:', err.message); }
@@ -431,15 +432,7 @@ export default function Home() {
         setDieselEntries([...dieselEntries, newEntry]);
         // saveDieselToSupabase was deleted in favor of syncToSupabase.
         // Let's use a specific call for diesel.
-        supabase.from('diesel_entries').upsert({
-          id: newEntry.id,
-          sr_no: newEntry.srNo,
-          tractor_number: newEntry.tractorNumber,
-          total_liters: newEntry.totalLiters,
-          total_amount: newEntry.totalAmount,
-          status: newEntry.status,
-          transactions: newEntry.transactions
-        });
+        syncToSupabase('diesel_entries', newEntry);
       }
     } else {
       const existingIndex = entries.findIndex(e => 

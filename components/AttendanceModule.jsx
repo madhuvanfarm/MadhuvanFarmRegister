@@ -14,6 +14,9 @@ const AttendanceModule = ({ onBack }) => {
   const [viewingStaffId, setViewingStaffId] = useState(null);
   const [staffSearchTerm, setStaffSearchTerm] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [contractors, setContractors] = useState([]);
+  const [selectedContractorId, setSelectedContractorId] = useState(null);
 
   // Forms
   const [newContractorName, setNewContractorName] = useState('');
