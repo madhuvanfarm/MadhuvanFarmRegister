@@ -18,6 +18,22 @@ export default function Home() {
   const { user, logout } = useAuth();
   const [activeModule, setActiveModule] = useState(null); // 'sugarcane' or 'attendance'
   
+  // Persist active module choice
+  useEffect(() => {
+    if (mounted) {
+      const savedModule = localStorage.getItem('madhuvan_active_module');
+      if (savedModule) setActiveModule(savedModule);
+    }
+  }, [mounted]);
+
+  useEffect(() => {
+    if (mounted && activeModule) {
+      localStorage.setItem('madhuvan_active_module', activeModule);
+    } else if (mounted && !activeModule) {
+      localStorage.removeItem('madhuvan_active_module');
+    }
+  }, [activeModule, mounted]);
+  
   // State initialization
   const [reminderDays, setReminderDays] = useState(15);
   const [masterData, setMasterData] = useState({
@@ -47,61 +63,11 @@ export default function Home() {
   const [showBillModal, setShowBillModal] = useState(false);
   const [billTarget, setBillTarget] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
-
-  // Load from localStorage on mount (as fallback/initial state)
   useEffect(() => {
     setMounted(true);
-    
     const savedReminder = localStorage.getItem('sugarcane_reminder_days');
     if (savedReminder) setReminderDays(parseInt(savedReminder));
-    
-    const savedMaster = localStorage.getItem('sugarcane_master_data');
-    if (savedMaster) setMasterData(JSON.parse(savedMaster));
-    
-    // Load initial state from localStorage (Immediate UI)
-    const savedEntries = localStorage.getItem('sugarcane_entries');
-    if (savedEntries) {
-      const parsed = JSON.parse(savedEntries);
-      setEntries(parsed.map(e => ({ ...e, totalWeightKG: parseFloat(e.totalWeightKG) || 0, totalAmount: parseFloat(e.totalAmount) || 0 })));
-    }
-    
-    const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries') || localStorage.getItem('sugarcane_lender_entries');
-    if (savedBijane) setBijaneApeliEntries(JSON.parse(savedBijane).map(e => ({ ...e, entryType: 'bijane_apeli', receiverName: e.receiverName || e.giverName || e.lenderName || '' })));
-    
-    const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
-    if (savedBorrow) setBorrowEntries(JSON.parse(savedBorrow));
-
-    const savedDiesel = localStorage.getItem('sugarcane_diesel_entries');
-    if (savedDiesel) setDieselEntries(JSON.parse(savedDiesel));
   }, []);
-
-
-  // Save to localStorage
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem('sugarcane_master_data', JSON.stringify(masterData));
-  }, [masterData, mounted]);
-
-
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem('sugarcane_entries', JSON.stringify(entries));
-  }, [entries, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem('sugarcane_bijane_apeli_entries', JSON.stringify(bijaneApeliEntries));
-  }, [bijaneApeliEntries, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem('sugarcane_borrow_entries', JSON.stringify(borrowEntries));
-  }, [borrowEntries, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem('sugarcane_diesel_entries', JSON.stringify(dieselEntries));
-  }, [dieselEntries, mounted]);
 
 
   useEffect(() => {
@@ -120,8 +86,8 @@ export default function Home() {
         status: entry.status || 'Pending',
         transactions: entry.transactions || [],
         total_amount: parseFloat(entry.totalAmount) || 0,
-        doneDate: entry.doneDate || null,
-        reminderDays: entry.reminderDays || 15
+        done_date: entry.doneDate || null,
+        reminder_days: entry.reminderDays || 15
       };
 
       if (table === 'diesel_entries' || table === 'diesel') {
@@ -219,21 +185,21 @@ export default function Home() {
       const { data: deliv, error: drr } = await supabase.from('deliveries').select('*').eq('user_id', user.id).order('sr_no');
       if (drr) throw drr;
       if (deliv?.length > 0) {
-        setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no })));
+        setEntries(deliv.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, totalBijaneApeli: d.total_bijane_apeli, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
         hasData = true;
       }
 
       const { data: lend, error: lrr } = await supabase.from('lending').select('*').eq('user_id', user.id).order('sr_no');
       if (lrr) throw lrr;
       if (lend?.length > 0) {
-        setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+        setBijaneApeliEntries(lend.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
         hasData = true;
       }
 
       const { data: borr, error: brr } = await supabase.from('borrowing').select('*').eq('user_id', user.id).order('sr_no');
       if (brr) throw brr;
       if (borr?.length > 0) {
-        setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no })));
+        setBorrowEntries(borr.map(d => ({ ...d, firstName: d.first_name, lastName: d.last_name, totalWeightKG: d.total_weight_kg, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
         hasData = true;
       }
 
@@ -247,7 +213,7 @@ export default function Home() {
       const { data: diesel, error: dsrr } = await supabase.from('diesel_entries').select('*').eq('user_id', user.id).order('sr_no');
       if (dsrr) throw dsrr;
       if (diesel?.length > 0) {
-        setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no })));
+        setDieselEntries(diesel.map(d => ({ ...d, tractorNumber: d.tractor_number, totalLiters: d.total_liters, srNo: d.sr_no, doneDate: d.done_date, reminderDays: d.reminder_days })));
         hasData = true;
       }
       console.log('✅ All data fetched from cloud.');
@@ -261,38 +227,9 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const performInitialFetch = async () => {
-      if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const foundData = await fetchAllFromSupabase();
-        
-        // If Cloud is empty and we have local data, do an auto-migration once
-        if (!foundData) {
-          const savedEntries = localStorage.getItem('sugarcane_entries');
-          const localEntries = savedEntries ? JSON.parse(savedEntries) : [];
-          if (localEntries.length > 0) {
-            console.log('Automating initial cloud migration...');
-            
-            const savedBijane = localStorage.getItem('sugarcane_bijane_apeli_entries') || localStorage.getItem('sugarcane_lender_entries');
-            const localBijane = savedBijane ? JSON.parse(savedBijane) : [];
-            const savedBorrow = localStorage.getItem('sugarcane_borrow_entries');
-            const localBorrow = savedBorrow ? JSON.parse(savedBorrow) : [];
-            const savedDiesel = localStorage.getItem('sugarcane_diesel_entries');
-            const localDiesel = savedDiesel ? JSON.parse(savedDiesel) : [];
-            const savedMaster = localStorage.getItem('sugarcane_master_data');
-            const localMaster = savedMaster ? JSON.parse(savedMaster) : null;
-            
-            await pushLocalToSupabase(true, {
-              entries: localEntries,
-              bijane: localBijane,
-              borrow: localBorrow,
-              diesel: localDiesel,
-              master: localMaster
-            });
-          }
-        }
-      }
-    };
-    performInitialFetch();
+    if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      fetchAllFromSupabase();
+    }
   }, [mounted, user]);
 
   // Sync selectedEntry
@@ -592,7 +529,7 @@ export default function Home() {
   };
 
 
-  const totalInwardKG = [...entries, ...borrowEntries].reduce((acc, curr) => acc + (parseFloat(curr.totalWeightKG) || 0), 0);
+  const totalInwardKG = [...entries, ...borrowEntries, ...bijaneApeliEntries].reduce((acc, curr) => acc + (parseFloat(curr.totalWeightKG) || 0), 0);
   const totalOutwardKG = bijaneApeliEntries.reduce((acc, curr) => acc + (parseFloat(curr.totalWeightKG) || 0), 0);
   const formatTons = (kg) => (kg / 1000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -1119,6 +1056,7 @@ export default function Home() {
               deliveries: entries.length, 
               bijane_apeli: bijaneApeliEntries.length, 
               borrowing: borrowEntries.length,
+              totalDelivered: entries.length + bijaneApeliEntries.length + borrowEntries.length,
               diesel: dieselEntries.length
             }} 
             financial={{

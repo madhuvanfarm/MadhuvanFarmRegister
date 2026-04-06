@@ -57,33 +57,12 @@ const AttendanceModule = ({ onBack }) => {
 
   useEffect(() => {
     setMounted(true);
-    // Load initial state from localStorage (Immediate UI)
-    const saved = localStorage.getItem('madhuvan_attendance_v2');
-    if (saved) setContractors(JSON.parse(saved));
   }, []);
 
   useEffect(() => {
-    const handleInitialSync = async () => {
-      if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const cloudCount = await fetchContractors();
-        
-        // Auto-migrate if Cloud is empty but local has data
-        if (cloudCount === 0) {
-          const saved = localStorage.getItem('madhuvan_attendance_v2');
-          if (saved && JSON.parse(saved).length > 0) {
-            console.log('Automating initial attendance cloud migration...');
-            const localData = JSON.parse(saved);
-            for (const c of localData) {
-              await syncContractorToSupabase(c);
-              for (const s of c.staff) await syncStaffToSupabase(s, c.id);
-              await syncRecordsToSupabase(c.records, c.id);
-            }
-            fetchContractors(); // Refresh state from cloud
-          }
-        }
-      }
-    };
-    handleInitialSync();
+    if (mounted && user && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      fetchContractors();
+    }
   }, [mounted, user]);
 
   const syncContractorToSupabase = async (contractor) => {
@@ -167,9 +146,7 @@ const AttendanceModule = ({ onBack }) => {
   };
 
   useEffect(() => {
-    if (mounted && !process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      localStorage.setItem('madhuvan_attendance_v2', JSON.stringify(contractors));
-    }
+    // We no longer persist to localStorage in Cloud-Only mode
   }, [contractors, mounted]);
 
   const selectedContractor = contractors.find(c => c.id === selectedContractorId);

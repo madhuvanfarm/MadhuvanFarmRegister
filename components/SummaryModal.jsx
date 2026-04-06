@@ -58,6 +58,10 @@ const SummaryModal = ({ isOpen, onClose, stats, counts, financial }) => {
           <div className="glass-card" style={{ padding: '25px' }}>
             <h4 style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '20px' }}>Account Distribution</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 15px', background: 'rgba(76, 175, 80, 0.1)', borderRadius: '14px', border: '1px solid rgba(76, 175, 80, 0.2)', marginBottom: '5px' }}>
+                <span style={{ color: 'var(--primary-light)', fontWeight: '700' }}>TOTAL DELIVERED RECORDS</span>
+                <span style={{ fontWeight: '800', fontSize: '1.1rem', color: 'white' }}>{counts.totalDelivered || 0}</span>
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ color: 'var(--text-primary)' }}>Deliveries (Sellers)</span>
                 <span style={{ fontWeight: '700', padding: '4px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '20px' }}>{counts.deliveries}</span>
